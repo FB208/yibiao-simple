@@ -1,3 +1,7 @@
+# 用户配置文件
+user_config.json
+
+# 原有的gitignore内容保持不变
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

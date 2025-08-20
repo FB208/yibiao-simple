@@ -1,0 +1,35 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "调试Streamlit应用",
+            "type": "python",
+            "request": "launch",
+            "module": "streamlit",
+            "args": [
+                "run",
+                "main_app.py",
+                "--server.port=8501",
+                "--server.address=localhost"
+            ],
+            "console": "integratedTerminal",
+            "env": {
+                "STREAMLIT_SERVER_PORT": "8501",
+                "STREAMLIT_SERVER_ADDRESS": "localhost"
+            }
+        },
+        {
+            "name": "调试Streamlit模块",
+            "type": "python",
+            "request": "launch",
+            "module": "streamlit",
+            "args": [
+                "run",
+                "main_app.py",
+                "--server.port=8501",
+                "--server.address=localhost"
+            ],
+            "console": "integratedTerminal"
+        }
+    ]
+}
