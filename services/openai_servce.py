@@ -29,7 +29,7 @@ class OpenAIService:
         self, 
         messages: list, 
         temperature: float = 0.7,
-        max_tokens: int = 4000
+        response_format: dict = None
     ) -> Generator[str, None, None]:
         """
         流式聊天完成请求
@@ -37,7 +37,6 @@ class OpenAIService:
         Args:
             messages: 消息列表
             temperature: 温度参数，控制随机性
-            max_tokens: 最大token数
             
         Yields:
             流式返回的文本片段
@@ -47,8 +46,8 @@ class OpenAIService:
                 model=self.model_name,
                 messages=messages,
                 temperature=temperature,
-                max_tokens=max_tokens,
-                stream=True
+                stream=True,
+                **({"response_format": response_format} if response_format is not None else {})
             )
             
             for chunk in stream:
@@ -104,6 +103,73 @@ class OpenAIService:
         
         # 流式返回分析结果
         for chunk in self.stream_chat_completion(messages, temperature=0.3):
+            yield chunk
+            
+    def generate_outline(self, overview: str, requirements: str) -> Generator[str, None, None]:
+        """
+        生成标书目录结构
+        
+        Args:
+            overview: 项目概述信息
+            requirements: 技术评分要求信息
+            
+        Yields:
+            流式返回的JSON格式目录结构
+        """
+        system_prompt = """你是一个专业的标书编写专家。根据提供的项目概述和技术评分要求，生成投标文件中技术标部分的目录结构。
+
+要求：
+1. 目录结构要全面覆盖技术标的所有必要章节
+2. 章节名称要专业、准确，符合投标文件规范
+3. 一级目录名称要与技术评分要求中的章节名称一致，如果技术评分要求中没有章节名称，则结合技术评分要求中的内容，生成一级目录名称
+4. 一共包括三级目录
+5. 返回标准JSON格式，包含章节编号、标题、描述和子章节
+6. 除了JSON结果外，不要输出任何其他内容
+
+JSON格式要求：
+{
+  "outline": [
+    {
+      "id": "1",
+      "title": "",
+      "description": "",
+      "children": [
+        {
+          "id": "1.1",
+          "title": "",
+          "description": "",
+          "children":[
+              {
+                "id": "1.1.1",
+                "title": "",
+                "description": ""
+              }
+          ]
+        }
+      ]
+    }
+  ]
+}
+"""
+        
+        user_prompt = f"""请基于以下项目信息生成标书目录结构：
+
+项目概述：
+{overview}
+
+技术评分要求：
+{requirements}
+
+请生成完整的技术标目录结构，确保覆盖所有技术评分要点。"""
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        
+        # 流式返回目录结构
+        for chunk in self.stream_chat_completion(messages, temperature=0.7, response_format={"type": "json_object"}):
+            print(chunk, end="")
             yield chunk
 
 def get_openai_service() -> OpenAIService:

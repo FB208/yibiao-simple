@@ -46,6 +46,14 @@ def main():
     if 'model_name' not in st.session_state:
         st.session_state.model_name = 'gpt-3.5-turbo'
         
+    # 来自outline_edit.py的变量
+    if 'outline_data' not in st.session_state:
+        st.session_state.outline_data = None
+    if 'outline_generated' not in st.session_state:
+        st.session_state.outline_generated = False
+    if 'generating_outline' not in st.session_state:
+        st.session_state.generating_outline = False
+
     # 来自content_edit.py的变量
     if 'chapter_contents' not in st.session_state:
         st.session_state.chapter_contents = {}

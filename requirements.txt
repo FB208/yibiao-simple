@@ -1,6 +1,6 @@
-streamlit
+streamlit==1.48.1
 openai
 python-docx
 PyPDF2
-streamlit-option-menu
+streamlit-option-menu==0.3.6
 python-dotenv
