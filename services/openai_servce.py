@@ -194,7 +194,7 @@ JSON格式要求：
             yield "开始处理outline结构...\n"
 
             # 收集所有处理过程中的消息
-            for message in self._process_outline_recursive(outline_data['outline'], ""):
+            for message in self._process_outline_recursive(outline_data['outline'], "", []):
                 yield message
 
             # 重新转换为JSON并返回
@@ -206,13 +206,14 @@ JSON格式要求：
         except Exception as e:
             yield f"处理过程中发生错误: {str(e)}"
 
-    def _process_outline_recursive(self, chapters: list, parent_path: str = ""):
+    def _process_outline_recursive(self, chapters: list, parent_path: str = "", parent_chapters: list = None):
         """
         递归处理章节列表
 
         Args:
             chapters: 章节列表
             parent_path: 父级路径
+            parent_chapters: 上级章节列表，用于传递上下文信息
 
         Yields:
             处理过程中的状态消息
@@ -225,9 +226,22 @@ JSON格式要求：
             # 检查是否为叶子节点（没有children或children为空）
             is_leaf = 'children' not in chapter or not chapter.get('children', [])
 
+            # 准备当前章节信息
+            current_chapter_info = {
+                'id': chapter_id,
+                'title': chapter_title,
+                'description': chapter.get('description', '')
+            }
+
+            # 构建完整的上级章节列表
+            current_parent_chapters = []
+            if parent_chapters:
+                current_parent_chapters.extend(parent_chapters)
+            current_parent_chapters.append(current_chapter_info)
+
             if is_leaf:
                 # 为叶子节点生成内容
-                content = self._generate_chapter_content(chapter, parent_path)
+                content = self._generate_chapter_content(chapter, parent_path, current_parent_chapters[:-1])
                 if content:
                     chapter['content'] = content
                     yield f"✅ 为章节 {chapter_id} '{chapter_title}' 生成内容完成\n"
@@ -236,16 +250,17 @@ JSON格式要求：
             else:
                 # 递归处理子章节
                 yield f"📁 正在处理章节 {chapter_id} '{chapter_title}' 的子章节...\n"
-                for message in self._process_outline_recursive(chapter['children'], current_path):
+                for message in self._process_outline_recursive(chapter['children'], current_path, current_parent_chapters):
                     yield message
 
-    def _generate_chapter_content(self, chapter: dict, context_path: str = "") -> str:
+    def _generate_chapter_content(self, chapter: dict, context_path: str = "", parent_chapters: list = None) -> str:
         """
         为单个章节生成内容
 
         Args:
             chapter: 章节数据
             context_path: 上下文路径
+            parent_chapters: 上级章节列表，每个元素包含章节id、标题和描述
 
         Returns:
             生成的内容字符串
@@ -266,13 +281,21 @@ JSON格式要求：
 5. 直接返回章节内容，不要任何额外说明或格式标记
 """
 
+            # 构建上级章节信息
+            parent_info = ""
+            if parent_chapters:
+                parent_info = "上级章节信息：\n"
+                for parent in parent_chapters:
+                    parent_info += f"- {parent['id']} {parent['title']}\n  {parent['description']}\n"
+
             user_prompt = f"""请为以下标书章节生成具体内容：
 
+{parent_info if parent_info else ''}当前章节信息：
 章节ID: {chapter_id}
 章节标题: {chapter_title}
 章节描述: {chapter_description}
 
-请生成详细的专业内容，突出技术方案的优势和可行性。"""
+请根据上述章节层级关系，生成详细的专业内容，确保与上级章节的内容逻辑相承，突出技术方案的优势和可行性。"""
 
             # 调用AI生成内容
             messages = [
