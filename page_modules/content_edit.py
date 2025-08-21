@@ -4,12 +4,19 @@ from typing import Dict, List
 def render_content_edit_page() -> Dict:
     """
     渲染正文编辑页面
-    
+
     Returns:
         包含正文数据的字典
     """
-    
+
     st.header("📝 正文编辑")
+
+    # 显示传入的目录数据（用于调试）
+    if st.session_state.get('outline_data'):
+        with st.expander("📋 查看传入的目录数据", expanded=False):
+            st.json(st.session_state.outline_data)
+    else:
+        st.info("ℹ️ 未检测到目录数据，请先完成目录编辑步骤")
     st.markdown("### 第三步：编写和完善标书正文内容")
     
     # 章节选择器
@@ -47,7 +54,36 @@ def render_content_edit_page() -> Dict:
         st.markdown("**工具**")
         
         if st.button("🤖 AI生成", use_container_width=True):
-            st.info("AI生成功能待实现...")
+            st.info("正在为所有叶子节点生成内容...")
+            try:
+                from services.openai_servce import get_openai_service
+                openai_service = get_openai_service()
+
+                # 将outline数据转换为JSON字符串
+                import json
+                outline_json = json.dumps(st.session_state.outline_data, ensure_ascii=False)
+
+                # 创建占位符显示生成过程
+                status_placeholder = st.empty()
+
+                # 调用生成方法
+                full_response = ""
+                for chunk in openai_service.generate_content_single(outline_json):
+                    full_response += chunk
+                    status_placeholder.code(full_response[-1000:], language="text")  # 显示最后1000个字符
+
+                st.success("✅ 内容生成完成！")
+                status_placeholder.empty()
+
+                # 显示最终结果
+                st.code(full_response, language="json")
+
+            except Exception as e:
+                st.error(f"生成过程中发生错误: {str(e)}")
+            if st.session_state.get('outline_data'):
+                None
+            else:
+                st.warning("请先完成目录编辑步骤，获取outline数据")
         
         if st.button("🔄 优化内容", use_container_width=True):
             st.info("内容优化功能待实现...")

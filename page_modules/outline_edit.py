@@ -258,6 +258,8 @@ def _render_outline_tree():
         st.session_state.editing_chapter = None
         
         if _delete_chapter_by_path(path):
+            # 删除后重排序号
+            _renumber_all_chapters()
             st.success("✅ 章节已删除")
             st.rerun()
     
@@ -450,92 +452,61 @@ def _update_chapter_by_path(path: str, title: str, description: str) -> bool:
 def _add_chapter(target: Dict, title: str, description: str, as_child: bool) -> bool:
     """添加新章节"""
     try:
-        # 生成新ID
-        new_id = _generate_chapter_id(target, as_child)
-        
-        # 创建新章节
+        # 创建新章节（先用临时ID）
         new_chapter = {
-            'id': new_id,
+            'id': 'temp',
             'title': title,
             'description': description,
             'children': []
         }
         
         if as_child:
-            # 添加为子章节 - 直接通过路径找到目标章节并添加
+            # 添加为子章节
             success = _add_child_by_path(target['path'], new_chapter)
-            return success
         else:
             # 添加为同级章节
             parent, index = _get_chapter_by_path(target['path'])
             if parent is not None and index is not None:
                 parent.insert(index + 1, new_chapter)
-                return True
+                success = True
             else:
-                return False
+                success = False
         
-        return True
+        if success:
+            # 添加成功后重新排序所有章节
+            _renumber_all_chapters()
+            return True
+        else:
+            return False
         
     except Exception as e:
         st.error(f"添加失败：{str(e)}")
         return False
 
 
-def _generate_chapter_id(target: Dict, as_child: bool) -> str:
-    """生成章节ID"""
-    if as_child:
-        # 生成子级ID
-        parent_id = target['chapter']['id']
-        children = target['chapter'].get('children', [])
-        
-        if not children:
-            return f"{parent_id}.1"
-        
-        # 找最大的子级编号
-        max_num = 0
-        for child in children:
-            child_id = child.get('id', '')
-            if child_id.startswith(f"{parent_id}."):
-                try:
-                    num = int(child_id.split('.')[-1])
-                    max_num = max(max_num, num)
-                except ValueError:
-                    pass
-        
-        return f"{parent_id}.{max_num + 1}"
-    else:
-        # 生成同级ID
-        parent, index = _get_chapter_by_path(target['path'])
-        if not parent:
-            return "1"
-        
-        # 分析同级ID模式
-        target_id = target['chapter']['id']
-        id_parts = target_id.split('.')
-        
-        if len(id_parts) == 1:
-            # 根级，找最大编号
-            max_num = 0
-            for ch in parent:
-                try:
-                    num = int(ch['id'])
-                    max_num = max(max_num, num)
-                except ValueError:
-                    pass
-            return str(max_num + 1)
+def _renumber_all_chapters():
+    """重新为所有章节分配序号"""
+    if not st.session_state.outline_data or 'outline' not in st.session_state.outline_data:
+        return
+    
+    _renumber_chapters_recursive(st.session_state.outline_data['outline'], "")
+
+
+def _renumber_chapters_recursive(chapters: List[Dict], parent_id: str):
+    """递归重新编号章节"""
+    for i, chapter in enumerate(chapters):
+        # 生成新的ID
+        if parent_id:
+            new_id = f"{parent_id}.{i + 1}"
         else:
-            # 非根级，生成同前缀的编号
-            prefix = '.'.join(id_parts[:-1])
-            max_num = 0
-            for ch in parent:
-                ch_id = ch.get('id', '')
-                if ch_id.startswith(f"{prefix}."):
-                    try:
-                        num = int(ch_id.split('.')[-1])
-                        max_num = max(max_num, num)
-                    except ValueError:
-                        pass
-            return f"{prefix}.{max_num + 1}"
+            new_id = str(i + 1)
+        
+        # 更新章节ID
+        chapter['id'] = new_id
+        
+        # 递归处理子章节
+        if 'children' in chapter and chapter['children']:
+            _renumber_chapters_recursive(chapter['children'], new_id)
 
 
 def _add_child_by_path(path: str, new_chapter: Dict) -> bool:
