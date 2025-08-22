@@ -66,9 +66,12 @@ def render_content_edit_page() -> Dict:
                 # 创建占位符显示生成过程
                 status_placeholder = st.empty()
 
+                # 获取项目概述信息
+                project_overview = st.session_state.get('project_overview', '')
+                
                 # 调用生成方法
                 full_response = ""
-                for chunk in openai_service.generate_content_single(outline_json):
+                for chunk in openai_service.generate_content_single(outline_json, project_overview):
                     full_response += chunk
                     status_placeholder.code(full_response[-1000:], language="text")  # 显示最后1000个字符
 
