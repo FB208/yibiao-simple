@@ -7,6 +7,73 @@
 
 import sys
 import os
+
+# 立即应用元数据修补，在任何其他导入之前
+def apply_metadata_patch():
+    """立即应用元数据修补"""
+    try:
+        import importlib.metadata
+        original_version = importlib.metadata.version
+        original_distribution = importlib.metadata.distribution
+        
+        def patched_version(name):
+            if name == 'streamlit':
+                return '1.48.1'
+            try:
+                return original_version(name)
+            except Exception:
+                return '1.0.0'
+        
+        def patched_distribution(name):
+            if name == 'streamlit':
+                class MockDistribution:
+                    def __init__(self, version):
+                        self.version = version
+                        self._metadata = {
+                            'Version': version,
+                            'Name': 'streamlit',
+                            'Summary': 'A faster way to build and share data apps'
+                        }
+                    
+                    @property
+                    def metadata(self):
+                        return self._metadata
+                    
+                    def read_text(self, filename):
+                        if filename == 'METADATA':
+                            return f"Name: streamlit\nVersion: {self.version}\nSummary: A faster way to build and share data apps\n"
+                        return None
+                
+                return MockDistribution('1.48.1')
+            try:
+                return original_distribution(name)
+            except Exception:
+                class MockDistribution:
+                    def __init__(self, name, version='1.0.0'):
+                        self.version = version
+                        self._metadata = {'Version': version, 'Name': name, 'Summary': f'{name} package'}
+                    
+                    @property
+                    def metadata(self):
+                        return self._metadata
+                    
+                    def read_text(self, filename):
+                        if filename == 'METADATA':
+                            return f"Name: {name}\nVersion: {self.version}\n"
+                        return None
+                
+                return MockDistribution(name)
+        
+        importlib.metadata.version = patched_version
+        importlib.metadata.distribution = patched_distribution
+        return True
+    except Exception as e:
+        print(f"元数据修补失败: {e}")
+        return False
+
+# 立即应用修补
+apply_metadata_patch()
+
 import threading
 import time
 import webbrowser
@@ -29,21 +96,52 @@ def patch_streamlit_metadata():
         def patched_version(name):
             if name == 'streamlit':
                 return '1.48.1'
-            return original_version(name)
+            try:
+                return original_version(name)
+            except Exception:
+                return '1.0.0'
         
         def patched_distribution(name):
             if name == 'streamlit':
-                # 创建一个最小的Distribution对象
+                # 创建一个完整的Distribution对象
                 class MockDistribution:
                     def __init__(self, version):
                         self.version = version
+                        self._metadata = {
+                            'Version': version,
+                            'Name': 'streamlit',
+                            'Summary': 'A faster way to build and share data apps'
+                        }
                     
                     @property
                     def metadata(self):
-                        return {'Version': self.version, 'Name': 'streamlit'}
+                        return self._metadata
+                    
+                    def read_text(self, filename):
+                        if filename == 'METADATA':
+                            return f"Name: streamlit\nVersion: {self.version}\nSummary: A faster way to build and share data apps\n"
+                        return None
                 
                 return MockDistribution('1.48.1')
-            return original_distribution(name)
+            try:
+                return original_distribution(name)
+            except Exception:
+                # 为任何包都创建模拟对象
+                class MockDistribution:
+                    def __init__(self, name, version='1.0.0'):
+                        self.version = version
+                        self._metadata = {'Version': version, 'Name': name, 'Summary': f'{name} package'}
+                    
+                    @property
+                    def metadata(self):
+                        return self._metadata
+                    
+                    def read_text(self, filename):
+                        if filename == 'METADATA':
+                            return f"Name: {name}\nVersion: {self.version}\n"
+                        return None
+                
+                return MockDistribution(name)
         
         importlib.metadata.version = patched_version
         importlib.metadata.distribution = patched_distribution

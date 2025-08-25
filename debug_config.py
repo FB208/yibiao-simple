@@ -5,7 +5,7 @@
 import os
 import json
 
-CONFIG_FILE = "user_config.json"
+CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".ai_write_helper", "user_config.json")
 
 def debug_config():
     """调试配置功能"""
@@ -35,6 +35,12 @@ def debug_config():
     
     print(f"\n创建测试配置: {test_config}")
     try:
+        # 确保配置目录存在
+        config_dir = os.path.dirname(CONFIG_FILE)
+        if not os.path.exists(config_dir):
+            os.makedirs(config_dir, exist_ok=True)
+            print(f"✅ 创建配置目录: {config_dir}")
+            
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(test_config, f, ensure_ascii=False, indent=2)
         print("✅ 测试配置创建成功")

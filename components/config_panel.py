@@ -4,12 +4,21 @@ import os
 import openai
 from typing import List, Dict
 
-# 配置文件路径
-CONFIG_FILE = "user_config.json"
+# 配置文件路径 - 存储到用户家目录中
+CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".ai_write_helper", "user_config.json")
 
 def load_config() -> Dict:
     """从本地JSON文件加载配置"""
     config = {'api_key': '', 'base_url': '', 'model_name': 'gpt-3.5-turbo'}
+    
+    # 确保配置目录存在
+    config_dir = os.path.dirname(CONFIG_FILE)
+    if not os.path.exists(config_dir):
+        try:
+            os.makedirs(config_dir, exist_ok=True)
+        except Exception as e:
+            st.error(f"配置目录创建失败: {e}")
+            return config
     
     if os.path.exists(CONFIG_FILE):
         try:
@@ -28,6 +37,15 @@ def save_config(api_key: str, base_url: str, model_name: str) -> bool:
         'base_url': base_url,
         'model_name': model_name
     }
+    
+    # 确保配置目录存在
+    config_dir = os.path.dirname(CONFIG_FILE)
+    if not os.path.exists(config_dir):
+        try:
+            os.makedirs(config_dir, exist_ok=True)
+        except Exception as e:
+            st.error(f"配置目录创建失败: {e}")
+            return False
     
     try:
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
