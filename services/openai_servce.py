@@ -192,7 +192,7 @@ JSON格式要求：
                 return
 
             # 递归处理outline
-            yield "开始处理outline结构...\n"
+            # yield "开始处理outline结构...\n"
 
             # 收集所有处理过程中的消息
             for message in self._process_outline_recursive(outline_data['outline'], "", [], project_overview):
@@ -245,19 +245,20 @@ JSON格式要求：
                 # 为叶子节点生成内容
                 # 获取同级章节（排除当前章节）
                 sibling_chapters = [ch for ch in chapters if ch.get('id') != chapter_id]
-                content = self._generate_chapter_content(chapter, parent_path, current_parent_chapters[:-1], sibling_chapters, project_overview)
+                content = self._generate_chapter_content(chapter, current_parent_chapters[:-1], sibling_chapters, project_overview)
                 if content:
                     chapter['content'] = content
-                    yield f"✅ 为章节 {chapter_id} '{chapter_title}' 生成内容完成\n"
+                    yield content
+                    # yield f"✅ 为章节 {chapter_id} '{chapter_title}' 生成内容完成\n"
                 else:
                     yield f"❌ 为章节 {chapter_id} '{chapter_title}' 生成内容失败\n"
             else:
                 # 递归处理子章节
-                yield f"📁 正在处理章节 {chapter_id} '{chapter_title}' 的子章节...\n"
+                # yield f"📁 正在处理章节 {chapter_id} '{chapter_title}' 的子章节...\n"
                 for message in self._process_outline_recursive(chapter['children'], current_path, current_parent_chapters, project_overview):
                     yield message
 
-    def _generate_chapter_content(self, chapter: dict, context_path: str = "", parent_chapters: list = None, sibling_chapters: list = None, project_overview: str = "") -> str:
+    def _generate_chapter_content(self, chapter: dict,  parent_chapters: list = None, sibling_chapters: list = None, project_overview: str = "") -> str:
         """
         为单个章节生成内容
 
@@ -285,7 +286,7 @@ JSON格式要求：
 3. 语言要正式、规范，符合标书写作要求，但不要使用奇怪的连接词，不要让人觉得内容像是AI生成的
 4. 内容要详细具体，避免空泛的描述
 5. 注意避免与同级章节内容重复，保持内容的独特性和互补性
-6. 直接返回章节内容，不标题，不要任何额外说明或格式标记
+6. 直接返回章节内容，不生成标题，不要任何额外说明或格式标记
 """
 
             # 构建上下文信息
@@ -328,7 +329,7 @@ JSON格式要求：
             full_content = ""
             for chunk in self.stream_chat_completion(messages, temperature=0.7):
                 full_content += chunk
-
+            print(full_content.strip())
             return full_content.strip()
 
         except Exception as e:

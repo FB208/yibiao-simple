@@ -65,15 +65,15 @@ def _check_prerequisites() -> bool:
 
 def _render_control_panel():
     """渲染控制面板（生成、新增按钮等）"""
-    st.markdown("""
-    <div style="
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 20px;
-        border-radius: 12px;
-        margin: 20px 0;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    ">
-    """, unsafe_allow_html=True)
+    # st.markdown("""
+    # <div style="
+    #     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    #     padding: 20px;
+    #     border-radius: 12px;
+    #     margin: 20px 0;
+    #     box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    # ">
+    # """, unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns([1.2, 1.2, 1.6])
     

@@ -68,7 +68,7 @@ def main():
     
     # 渲染步骤条
     render_step_bar(steps, st.session_state.current_step)
-    
+    st.session_state.current_step=2
     # 渲染当前页面内容
     if st.session_state.current_step == 0:
         # 标书解析页面
