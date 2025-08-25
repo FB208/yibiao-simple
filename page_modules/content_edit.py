@@ -4,6 +4,8 @@ import threading
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Tuple
+import io
+from datetime import datetime
 
 
 def render_content_edit_page() -> Dict:
@@ -69,12 +71,22 @@ def render_content_edit_page() -> Dict:
         # 生成正文按钮
         generate_button = st.button("🤖 生成正文", use_container_width=True, type="primary")
         
-        # 导出按钮（仅在内容生成完成后可用）
-        export_disabled = not st.session_state.get('content_generated', False)
-        export_button = st.button("📤 导出文档", use_container_width=True, disabled=export_disabled)
+        # 导出按钮（仅在有生成内容时可用）
+        generated_content = st.session_state.get('generated_content', {})
+        has_content = bool(generated_content and len(generated_content) > 0)
         
-        if export_button:
-            st.info("导出功能开发中...")
+        # 调试信息（可选，帮助排查问题）
+        if st.checkbox("🔍 显示调试信息", value=False):
+            st.write(f"generated_content 存在: {generated_content is not None}")
+            st.write(f"generated_content 长度: {len(generated_content) if generated_content else 0}")
+            st.write(f"has_content: {has_content}")
+            if generated_content:
+                st.write("generated_content 键:", list(generated_content.keys())[:3])  # 显示前3个键
+        
+        export_button = st.button("📤 导出文档", use_container_width=True, disabled=not has_content)
+        
+        if export_button and has_content:
+            _export_document()
     
     with col1:
         # 内容显示区域
@@ -147,6 +159,9 @@ def _generate_content(container):
             # 显示完成摘要
             st.success(f"🎉 成功生成 {total_nodes} 个章节的内容")
             
+            # 刷新页面状态，确保导出按钮能立即可用
+            st.rerun()
+            
     except ImportError:
         st.error("❌ 无法导入OpenAI服务，请检查服务配置")
     except Exception as e:
@@ -158,17 +173,75 @@ def _display_generated_content(container):
     显示已生成的内容
     """
     with container:
-        st.markdown("### 📋 已生成的内容")
+        st.markdown("### 📋 生成内容预览")
         
         generated_content = st.session_state.get('generated_content', {})
+        outline_data = st.session_state.get('outline_data', {})
         
         if not generated_content:
             st.info("暂无已生成的内容")
             return
         
+        # 按照目录结构重新显示内容，与生成时的显示方式保持一致
+        _display_content_by_outline_structure(generated_content, outline_data)
+
+
+def _display_content_by_outline_structure(generated_content, outline_data):
+    """
+    按照目录结构显示已生成的内容，与生成时的显示方式保持一致
+    
+    Args:
+        generated_content: 生成的内容字典
+        outline_data: 目录数据
+    """
+    if not outline_data or 'outline' not in outline_data:
+        # 如果没有目录结构，就按简单方式显示
         for node_path, content in generated_content.items():
-            with st.expander(f"📄 {node_path}", expanded=False):
+            # 解析路径获取标题
+            parts = node_path.split(' ', 1)
+            title = parts[1] if len(parts) > 1 else node_path
+            st.markdown(f"### {title}")
+            st.markdown(content)
+            st.markdown("---")
+        return
+    
+    # 按照目录结构递归显示
+    for chapter in outline_data['outline']:
+        _display_chapter_content_recursive(chapter, generated_content, level=1)
+
+
+def _display_chapter_content_recursive(chapter, generated_content, level=1):
+    """
+    递归显示章节内容，保持与生成时的显示格式一致
+    
+    Args:
+        chapter: 当前章节
+        generated_content: 生成的内容字典
+        level: 当前层级
+    """
+    chapter_id = chapter.get('id', '')
+    chapter_title = chapter.get('title', '未命名章节')
+    
+    # 显示章节标题
+    title_prefix = "#" * min(level + 2, 6) + " "
+    st.markdown(title_prefix + chapter_title)
+    
+    # 检查是否为叶子节点
+    is_leaf = not chapter.get('children') or len(chapter['children']) == 0
+    
+    if is_leaf:
+        # 叶子节点，显示生成的内容
+        chapter_path = f"{chapter_id} {chapter_title}"
+        if chapter_path in generated_content:
+            content = generated_content[chapter_path]
+            if content and not content.startswith('生成'):  # 排除错误信息
                 st.markdown(content)
+            else:
+                st.error(content)  # 显示错误信息
+    else:
+        # 非叶子节点，递归处理子节点
+        for child in chapter['children']:
+            _display_chapter_content_recursive(child, generated_content, level + 1)
 
 
 def _count_leaf_nodes(data) -> int:
@@ -395,6 +468,151 @@ def _generate_content_concurrent(leaf_nodes_info, node_containers, openai_servic
                 if 'generated_content' not in st.session_state:
                     st.session_state.generated_content = {}
                 st.session_state.generated_content[node_path] = f'生成异常: {exc}'
+
+
+def _export_document():
+    """
+    导出生成的文档内容
+    """
+    try:
+        generated_content = st.session_state.get('generated_content', {})
+        outline_data = st.session_state.get('outline_data', {})
+        
+        if not generated_content:
+            st.error("❌ 没有可导出的内容")
+            return
+        
+        # 按照目录结构组织内容
+        organized_content = _organize_content_by_outline(generated_content, outline_data)
+        
+        # 生成文档内容
+        doc_content = _generate_document_content(organized_content, outline_data)
+        
+        # 创建文件名
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"标书正文_{timestamp}.md"
+        
+        # 提供下载
+        st.download_button(
+            label="💾 下载Markdown文档",
+            data=doc_content,
+            file_name=filename,
+            mime="text/markdown",
+            use_container_width=True
+        )
+        
+        # 显示成功信息
+        st.success(f"✅ 文档已准备完成！点击上方按钮下载 {filename}")
+        
+        # 显示内容预览
+        with st.expander("📋 文档内容预览", expanded=False):
+            st.markdown(doc_content)
+            
+    except Exception as e:
+        st.error(f"❌ 导出过程中发生错误: {str(e)}")
+
+
+def _organize_content_by_outline(generated_content, outline_data):
+    """
+    按照目录结构组织生成的内容
+    
+    Args:
+        generated_content: 生成的内容字典
+        outline_data: 目录数据
+        
+    Returns:
+        组织后的内容结构
+    """
+    organized = {}
+    
+    # 遍历generated_content，按路径组织
+    for path, content in generated_content.items():
+        # 解析路径，提取章节ID
+        parts = path.split(' ', 1)
+        if len(parts) >= 2:
+            chapter_id = parts[0]
+            chapter_title = parts[1]
+            organized[chapter_id] = {
+                'title': chapter_title,
+                'content': content,
+                'path': path
+            }
+    
+    return organized
+
+
+def _generate_document_content(organized_content, outline_data):
+    """
+    生成完整的文档内容
+    
+    Args:
+        organized_content: 组织后的内容
+        outline_data: 目录数据
+        
+    Returns:
+        完整的文档字符串
+    """
+    doc_lines = []
+    
+    # 添加文档标题
+    doc_lines.append("# 标书正文")
+    doc_lines.append("")
+    doc_lines.append(f"*生成时间: {datetime.now().strftime('%Y年%m月%d日 %H:%M:%S')}*")
+    doc_lines.append("")
+    doc_lines.append("---")
+    doc_lines.append("")
+    
+    # 按目录结构递归添加内容
+    if outline_data and 'outline' in outline_data:
+        for chapter in outline_data['outline']:
+            _add_chapter_content_recursive(chapter, organized_content, doc_lines, level=1)
+    
+    return "\n".join(doc_lines)
+
+
+def _add_chapter_content_recursive(chapter, organized_content, doc_lines, level=1):
+    """
+    递归添加章节内容到文档
+    
+    Args:
+        chapter: 当前章节
+        organized_content: 组织后的内容
+        doc_lines: 文档行列表
+        level: 当前层级
+    """
+    chapter_id = chapter.get('id', '')
+    chapter_title = chapter.get('title', '未命名章节')
+    chapter_description = chapter.get('description', '')
+    
+    # 添加章节标题
+    title_prefix = "#" * min(level + 1, 6) + " "
+    doc_lines.append(f"{title_prefix}{chapter_id} {chapter_title}")
+    doc_lines.append("")
+    
+    # 检查是否为叶子节点
+    is_leaf = not chapter.get('children') or len(chapter['children']) == 0
+    
+    if is_leaf:
+        # 叶子节点，添加生成的内容
+        if chapter_id in organized_content:
+            content = organized_content[chapter_id]['content']
+            if content and not content.startswith('生成'):  # 排除错误信息
+                doc_lines.append(content)
+                doc_lines.append("")
+        else:
+            # 如果没有生成内容，添加描述
+            if chapter_description:
+                doc_lines.append(f"*{chapter_description}*")
+                doc_lines.append("")
+    else:
+        # 非叶子节点，添加描述（如果有）并递归处理子节点
+        if chapter_description:
+            doc_lines.append(f"*{chapter_description}*")
+            doc_lines.append("")
+        
+        # 递归处理子节点
+        for child in chapter['children']:
+            _add_chapter_content_recursive(child, organized_content, doc_lines, level + 1)
 
 
 def _process_outline_recursively(data, openai_service, project_overview, progress_bar, 
