@@ -1,6 +1,9 @@
 import streamlit as st
 import json
-from typing import Dict, List
+import threading
+import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor
+from typing import Dict, List, Tuple
 
 
 def render_content_edit_page() -> Dict:
@@ -10,6 +13,40 @@ def render_content_edit_page() -> Dict:
     Returns:
         包含页面状态数据的字典
     """
+    
+    # 添加返回顶部按钮 - 使用简单的HTML实现
+    st.markdown("""
+    <style>
+        .back-to-top {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background-color: #ff6b6b;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            font-size: 18px;
+            cursor: pointer;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            z-index: 999;
+            text-align: center;
+            line-height: 50px;
+            text-decoration: none;
+            display: block;
+        }
+        .back-to-top:hover {
+            background-color: #ff5252;
+            text-decoration: none;
+            color: white;
+        }
+    </style>
+    <a href="#top" class="back-to-top" title="返回顶部">↑</a>
+    """, unsafe_allow_html=True)
+    
+    # 添加顶部锚点
+    st.markdown('<div id="top"></div>', unsafe_allow_html=True)
     
     st.header("📝 正文编辑")
     
@@ -91,17 +128,15 @@ def _generate_content(container):
                 st.error("未找到可生成内容的叶子节点")
                 return
             
-            # 递归处理outline_data，生成叶子节点内容
-            processed_count = {"count": 0}  # 使用字典以便在递归中修改
-            _process_outline_recursively(
+            # 使用并发方式处理outline_data，生成叶子节点内容
+            _process_outline_concurrent(
+                container,
                 outline_data,
                 openai_service,
                 project_overview,
                 progress_bar,
                 status_text,
-                total_nodes,
-                processed_count,
-                ""
+                total_nodes
             )
             
             # 生成完成
@@ -165,6 +200,201 @@ def _count_leaf_nodes_recursive(nodes) -> int:
             count += _count_leaf_nodes_recursive(node['children'])
     
     return count
+
+
+def _process_outline_concurrent(container, data, openai_service, project_overview, progress_bar, status_text, total_nodes):
+    """
+    并发处理outline_data，为叶子节点生成内容
+    
+    Args:
+        container: Streamlit容器
+        data: outline数据
+        openai_service: OpenAI服务实例
+        project_overview: 项目概述
+        progress_bar: 进度条组件
+        status_text: 状态文本组件
+        total_nodes: 总叶子节点数
+    """
+    with container:
+        # 第一步：收集所有叶子节点信息和创建显示容器
+        leaf_nodes_info = []
+        node_containers = {}
+        
+        st.markdown("### 📋 生成内容预览")
+        
+        # 递归收集叶子节点信息并创建显示结构
+        _collect_and_display_structure(data, leaf_nodes_info, node_containers, parent_chapters=[], level=1)
+        
+        if not leaf_nodes_info:
+            st.error("未找到叶子节点")
+            return
+        
+        # 第二步：并发生成内容
+        _generate_content_concurrent(leaf_nodes_info, node_containers, openai_service, project_overview, progress_bar, status_text)
+
+
+def _collect_and_display_structure(data, leaf_nodes_info, node_containers, parent_chapters=None, level=1):
+    """
+    递归收集叶子节点信息并创建显示结构
+    
+    Args:
+        data: 当前处理的数据
+        leaf_nodes_info: 叶子节点信息列表
+        node_containers: 节点容器字典
+        parent_chapters: 父级章节信息
+        level: 当前层级
+    """
+    if parent_chapters is None:
+        parent_chapters = []
+    
+    # 处理outline根节点
+    if isinstance(data, dict) and 'outline' in data:
+        outline_chapters = data['outline']
+        for chapter in outline_chapters:
+            _process_chapter_structure_with_siblings(chapter, outline_chapters, leaf_nodes_info, node_containers, parent_chapters, level)
+    
+    
+
+
+def _process_chapter_structure_with_siblings(chapter, all_siblings, leaf_nodes_info, node_containers, parent_chapters, level):
+    """
+    处理单个章节的结构，包含兄弟节点信息
+    """
+    chapter_id = chapter.get('id', 'unknown')
+    chapter_title = chapter.get('title', '未命名章节')
+    chapter_path = f"{chapter_id} {chapter_title}"
+    
+    # 显示当前章节标题
+    title_prefix = "#" * min(level + 2, 6) + " "
+    st.markdown(title_prefix + chapter_title)
+    
+    # 检查是否为叶子节点
+    is_leaf = not chapter.get('children') or len(chapter['children']) == 0
+    
+    if is_leaf:
+        # 叶子节点：创建容器并收集信息
+        content_container = st.empty()
+        node_containers[chapter_path] = content_container
+        
+        # 收集兄弟节点信息（排除自己）
+        sibling_chapters = [sib for sib in all_siblings if sib.get('id') != chapter.get('id')]
+        
+        # 构建节点信息
+        node_info = {
+            'chapter': chapter,
+            'parent_chapters': parent_chapters.copy(),
+            'sibling_chapters': sibling_chapters,
+            'level': level,
+            'path': chapter_path
+        }
+        leaf_nodes_info.append((chapter_path, node_info))
+        
+        # 在容器中显示"生成中..."提示
+        content_container.info("🔄 等待生成...")
+        
+    else:
+        # 非叶子节点：递归处理子节点
+        current_chapter_info = {
+            'id': chapter.get('id'),
+            'title': chapter.get('title'),
+            'description': chapter.get('description', '')
+        }
+        new_parent_chapters = parent_chapters + [current_chapter_info]
+        
+        # 处理所有子节点
+        children = chapter['children']
+        for child in children:
+            _process_chapter_structure_with_siblings(child, children, leaf_nodes_info, node_containers, new_parent_chapters, level + 1)
+
+
+def _generate_content_concurrent(leaf_nodes_info, node_containers, openai_service, project_overview, progress_bar, status_text):
+    """
+    并发生成内容
+    """
+    total_nodes = len(leaf_nodes_info)
+    
+    # 预先提取配置信息，避免在子线程中访问
+    api_key = openai_service.api_key
+    base_url = openai_service.base_url
+    model_name = openai_service.model_name
+    
+    def generate_single_node_safe(node_data):
+        """线程安全的内容生成函数 - 不访问任何Streamlit组件"""
+        node_path, node_info = node_data
+        try:
+            # 在子线程中创建独立的服务实例
+            from services.openai_servce import OpenAIService
+            thread_service = OpenAIService(
+                api_key=api_key,
+                base_url=base_url,
+                model_name=model_name
+            )
+            
+            # 生成内容
+            generated_text = thread_service._generate_chapter_content(
+                node_info['chapter'],
+                parent_chapters=node_info['parent_chapters'],
+                sibling_chapters=node_info['sibling_chapters'],
+                project_overview=project_overview
+            )
+            
+            return node_path, generated_text, None
+            
+        except Exception as e:
+            error_msg = f"生成失败: {str(e)}"
+            return node_path, None, error_msg
+    
+    # 使用线程池并发处理，但在主线程中更新UI
+    max_workers = 5
+    completed_count = 0
+    
+    # 创建进度显示容器
+    progress_container = st.container()
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # 提交所有任务
+        futures = {executor.submit(generate_single_node_safe, node_data): node_data 
+                  for node_data in leaf_nodes_info}
+        
+        # 处理完成的任务
+        for future in concurrent.futures.as_completed(futures):
+            node_data = futures[future]
+            node_path = node_data[0]
+            
+            try:
+                result_path, content, error = future.result()
+                
+                # 主线程中更新UI
+                container = node_containers[result_path]
+                if error:
+                    container.error(error)
+                else:
+                    container.markdown(content)
+                
+                # 保存到session state
+                if 'generated_content' not in st.session_state:
+                    st.session_state.generated_content = {}
+                st.session_state.generated_content[result_path] = content if not error else error
+                
+                # 更新进度
+                completed_count += 1
+                progress = completed_count / total_nodes
+                progress_bar.progress(progress)
+                status_text.markdown(f"**已完成 {completed_count}/{total_nodes} 个章节**")
+                
+            except Exception as exc:
+                completed_count += 1
+                progress = completed_count / total_nodes
+                progress_bar.progress(progress)
+                
+                # 显示错误
+                container = node_containers[node_path]
+                container.error(f'生成异常: {exc}')
+                
+                # 保存错误信息
+                if 'generated_content' not in st.session_state:
+                    st.session_state.generated_content = {}
+                st.session_state.generated_content[node_path] = f'生成异常: {exc}'
 
 
 def _process_outline_recursively(data, openai_service, project_overview, progress_bar, 
