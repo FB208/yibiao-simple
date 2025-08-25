@@ -6,6 +6,14 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Tuple
 import io
 from datetime import datetime
+try:
+    from docx import Document
+    from docx.shared import Inches, Pt
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml.ns import qn
+    DOCX_AVAILABLE = True
+except ImportError:
+    DOCX_AVAILABLE = False
 
 
 def render_content_edit_page() -> Dict:
@@ -71,21 +79,18 @@ def render_content_edit_page() -> Dict:
         # 生成正文按钮
         generate_button = st.button("🤖 生成正文", use_container_width=True, type="primary")
         
-        # 导出按钮（仅在有生成内容时可用）
-        generated_content = st.session_state.get('generated_content', {})
-        has_content = bool(generated_content and len(generated_content) > 0)
+        # 导出按钮（随时可以点击，方便调试）
+        export_button = st.button("📤 导出Word文档", use_container_width=True)
         
         # 调试信息（可选，帮助排查问题）
         if st.checkbox("🔍 显示调试信息", value=False):
+            generated_content = st.session_state.get('generated_content', {})
             st.write(f"generated_content 存在: {generated_content is not None}")
             st.write(f"generated_content 长度: {len(generated_content) if generated_content else 0}")
-            st.write(f"has_content: {has_content}")
             if generated_content:
                 st.write("generated_content 键:", list(generated_content.keys())[:3])  # 显示前3个键
         
-        export_button = st.button("📤 导出文档", use_container_width=True, disabled=not has_content)
-        
-        if export_button and has_content:
+        if export_button:
             _export_document()
     
     with col1:
@@ -472,44 +477,225 @@ def _generate_content_concurrent(leaf_nodes_info, node_containers, openai_servic
 
 def _export_document():
     """
-    导出生成的文档内容
+    导出生成的文档内容为Word格式
     """
     try:
         generated_content = st.session_state.get('generated_content', {})
         outline_data = st.session_state.get('outline_data', {})
         
         if not generated_content:
-            st.error("❌ 没有可导出的内容")
+            st.warning("⚠️ 暂无已生成的内容，将导出空白文档模板")
+            generated_content = {}
+        
+        if not DOCX_AVAILABLE:
+            st.error("❌ 缺少python-docx库，无法导出Word文档。请运行: pip install python-docx")
             return
         
-        # 按照目录结构组织内容
-        organized_content = _organize_content_by_outline(generated_content, outline_data)
+        # 创建Word文档
+        doc = Document()
         
-        # 生成文档内容
-        doc_content = _generate_document_content(organized_content, outline_data)
+        # 设置默认字体为宋体
+        _set_document_font(doc, '宋体')
+        
+        # 添加标题
+        title = doc.add_heading('标书正文', 0)
+        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_paragraph_font(title, '宋体', 18)
+        
+        # 添加AI生成说明
+        ai_para = doc.add_paragraph('内容由AI生成')
+        _set_paragraph_font(ai_para, '宋体', 12)
+        
+        # 添加生成时间
+        time_para = doc.add_paragraph(f'生成时间: {datetime.now().strftime("%Y年%m月%d日 %H:%M:%S")}')
+        _set_paragraph_font(time_para, '宋体', 12)
+        
+        doc.add_paragraph('')  # 空行
+        
+        # 按照目录结构添加内容
+        if outline_data and 'outline' in outline_data:
+            for chapter in outline_data['outline']:
+                _add_chapter_to_word_doc(doc, chapter, generated_content, level=1)
+        else:
+            # 如果没有目录结构，直接添加所有内容
+            for node_path, content in generated_content.items():
+                parts = node_path.split(' ', 1)
+                title = parts[1] if len(parts) > 1 else node_path
+                heading_para = doc.add_heading(title, 2)
+                _set_paragraph_font(heading_para, '宋体', 14)
+                
+                content_para = doc.add_paragraph(content)
+                _set_paragraph_font(content_para, '宋体', 12)
+        
+        # 将文档保存到内存
+        doc_buffer = io.BytesIO()
+        doc.save(doc_buffer)
+        doc_buffer.seek(0)
         
         # 创建文件名
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"标书正文_{timestamp}.md"
+        filename = f"标书正文_{timestamp}.docx"
         
         # 提供下载
         st.download_button(
-            label="💾 下载Markdown文档",
-            data=doc_content,
+            label="💾 下载Word文档",
+            data=doc_buffer.getvalue(),
             file_name=filename,
-            mime="text/markdown",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             use_container_width=True
         )
         
         # 显示成功信息
-        st.success(f"✅ 文档已准备完成！点击上方按钮下载 {filename}")
+        content_count = len(generated_content)
+        st.success(f"✅ Word文档已准备完成！包含 {content_count} 个已生成章节。点击上方按钮下载 {filename}")
         
-        # 显示内容预览
-        with st.expander("📋 文档内容预览", expanded=False):
-            st.markdown(doc_content)
+        # 显示内容统计
+        if generated_content:
+            with st.expander("📊 导出内容统计", expanded=False):
+                st.write(f"**包含章节数量:** {content_count}")
+                st.write("**包含章节列表:**")
+                for i, node_path in enumerate(generated_content.keys(), 1):
+                    st.write(f"{i}. {node_path}")
+        else:
+            st.info("ℹ️ 导出的是空白文档模板，包含标题和时间信息")
             
     except Exception as e:
         st.error(f"❌ 导出过程中发生错误: {str(e)}")
+
+
+def _set_document_font(doc, font_name):
+    """
+    设置整个文档的默认字体
+    
+    Args:
+        doc: Word文档对象
+        font_name: 字体名称
+    """
+    # 设置样式的默认字体
+    style = doc.styles['Normal']
+    font = style.font
+    font.name = font_name
+    font.size = Pt(12)
+    
+    # 为中文设置字体
+    style.element.rPr.rFonts.set(qn('w:eastAsia'), font_name)
+
+
+def _set_paragraph_font(paragraph, font_name, size=12):
+    """
+    设置段落的字体
+    
+    Args:
+        paragraph: 段落对象
+        font_name: 字体名称
+        size: 字体大小
+    """
+    # 如果段落没有runs，添加一个空的run
+    if not paragraph.runs:
+        run = paragraph.add_run()
+    
+    for run in paragraph.runs:
+        font = run.font
+        font.name = font_name
+        font.size = Pt(size)
+        # 为中文设置字体
+        run._element.rPr.rFonts.set(qn('w:eastAsia'), font_name)
+
+
+def _add_chapter_to_word_doc(doc, chapter, generated_content, level=1):
+    """
+    递归添加章节内容到Word文档
+    
+    Args:
+        doc: Word文档对象
+        chapter: 当前章节
+        generated_content: 生成的内容字典
+        level: 当前层级
+    """
+    chapter_id = chapter.get('id', '')
+    chapter_title = chapter.get('title', '未命名章节')
+    chapter_description = chapter.get('description', '')
+    
+    # 添加章节标题（Word标题级别从1开始，最大到9）
+    heading_level = min(level + 1, 9)
+    full_title = f"{chapter_id} {chapter_title}"
+    heading_para = doc.add_heading(full_title, heading_level)
+    # 设置标题字体为宋体
+    heading_size = max(16 - level, 12)  # 根据层级设置字体大小
+    _set_paragraph_font(heading_para, '宋体', heading_size)
+    
+    # 检查是否为叶子节点
+    is_leaf = not chapter.get('children') or len(chapter['children']) == 0
+    
+    if is_leaf:
+        # 叶子节点，添加生成的内容
+        chapter_path = f"{chapter_id} {chapter_title}"
+        if chapter_path in generated_content:
+            content = generated_content[chapter_path]
+            if content and not content.startswith('生成'):  # 排除错误信息
+                # 清理markdown格式并添加到Word文档
+                cleaned_content = _clean_markdown_for_word(content)
+                content_para = doc.add_paragraph(cleaned_content)
+                _set_paragraph_font(content_para, '宋体', 12)
+            else:
+                # 显示错误信息
+                error_para = doc.add_paragraph(f"[生成错误: {content}]")
+                _set_paragraph_font(error_para, '宋体', 12)
+        else:
+            # 如果没有生成内容，添加描述或占位符
+            if chapter_description:
+                placeholder_para = doc.add_paragraph(f"[待完善: {chapter_description}]")
+                _set_paragraph_font(placeholder_para, '宋体', 12)
+            else:
+                placeholder_para = doc.add_paragraph("[待完善]")
+                _set_paragraph_font(placeholder_para, '宋体', 12)
+    else:
+        # 非叶子节点，添加描述（如果有）并递归处理子节点
+        if chapter_description:
+            desc_para = doc.add_paragraph(chapter_description)
+            desc_para.italic = True
+            _set_paragraph_font(desc_para, '宋体', 12)
+        
+        # 递归处理子节点
+        for child in chapter['children']:
+            _add_chapter_to_word_doc(doc, child, generated_content, level + 1)
+
+
+def _clean_markdown_for_word(content):
+    """
+    清理markdown格式，使其适合Word文档
+    
+    Args:
+        content: 原始markdown内容
+        
+    Returns:
+        清理后的文本内容
+    """
+    if not content:
+        return ""
+    
+    # 简单的markdown清理，去除常见的markdown标记
+    import re
+    
+    # 去除markdown标题标记
+    content = re.sub(r'^#+\s*', '', content, flags=re.MULTILINE)
+    
+    # 去除markdown粗体和斜体标记
+    content = re.sub(r'\*\*(.*?)\*\*', r'\1', content)  # 粗体
+    content = re.sub(r'\*(.*?)\*', r'\1', content)      # 斜体
+    
+    # 去除markdown链接标记，保留链接文本
+    content = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', content)
+    
+    # 去除markdown列表标记
+    content = re.sub(r'^[-*+]\s+', '', content, flags=re.MULTILINE)
+    content = re.sub(r'^\d+\.\s+', '', content, flags=re.MULTILINE)
+    
+    # 去除markdown代码块标记
+    content = re.sub(r'```.*?```', '', content, flags=re.DOTALL)
+    content = re.sub(r'`(.*?)`', r'\1', content)
+    
+    return content.strip()
 
 
 def _organize_content_by_outline(generated_content, outline_data):
