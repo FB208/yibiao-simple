@@ -48,11 +48,11 @@ def patch_streamlit_metadata():
         importlib.metadata.version = patched_version
         importlib.metadata.distribution = patched_distribution
         
-        print("✓ Streamlit元数据修补成功")
+        print("Streamlit元数据修补成功")
         return True
         
     except Exception as e:
-        print(f"⚠ 元数据修补失败: {e}")
+        print(f"元数据修补失败: {e}")
         return False
 
 def find_free_port():
@@ -106,7 +106,7 @@ def run_streamlit_directly():
                     url = f"http://localhost:{test_port}"
                     response = urllib.request.urlopen(url, timeout=2)
                     if response.getcode() == 200:
-                        print(f"✓ 应用运行在端口 {test_port}")
+                        print(f"应用运行在端口 {test_port}")
                         print(f"在浏览器中打开: {url}")
                         webbrowser.open(url)
                         return
@@ -214,10 +214,9 @@ def main():
         lock_file = os.path.join(os.path.expanduser("~"), ".ai_write_helper.lock")
         
         if os.path.exists(lock_file):
-            print("检测到应用可能正在运行")
-            response = input("是否强制启动？(Y/n): ")
-            if response.lower() != 'n':
-                return
+            print("检测到应用可能正在运行，强制启动...")
+            # 删除旧的锁文件
+            os.remove(lock_file)
         
         # 创建锁文件
         with open(lock_file, 'w') as f:
@@ -227,7 +226,8 @@ def main():
             success = run_streamlit_directly()
             if not success:
                 print("所有启动方法都失败了")
-                input("按任意键退出...")
+                print("程序将在3秒后自动退出...")
+                time.sleep(3)
         finally:
             # 清理锁文件
             if os.path.exists(lock_file):
@@ -237,7 +237,8 @@ def main():
         print("\n用户中断，正在退出...")
     except Exception as e:
         print(f"程序异常: {e}")
-        input("按任意键退出...")
+        print("程序将在3秒后自动退出...")
+        time.sleep(3)
 
 if __name__ == "__main__":
     main()
